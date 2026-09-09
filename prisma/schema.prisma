@@ -1,0 +1,62 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum MemberStatus {
+  MEMBER
+  ADMINISTRATOR
+  CREATOR
+  RESTRICTED
+  LEFT
+  KICKED
+}
+
+model TelegramChannel {
+  id          BigInt             @id // Telegram chat ID (negative integer, e.g. -1001234567890)
+  title       String
+  username    String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  members     TelegramMember[]
+  events      MembershipEvent[]
+}
+
+model TelegramMember {
+  id           BigInt             @id // Telegram User ID
+  isBot        Boolean            @default(false)
+  firstName    String
+  lastName     String?
+  username     String?
+  languageCode String?
+  isPremium    Boolean            @default(false)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  channels     TelegramChannel[]
+  events       MembershipEvent[]
+}
+
+model MembershipEvent {
+  id            String             @id @default(uuid())
+  channelId     BigInt
+  memberId      BigInt
+  oldStatus     MemberStatus
+  newStatus     MemberStatus
+  transition    String             // e.g. JOINED, LEFT, BANNED
+  inviteLink    String?
+  inviteName    String?
+  eventDate     DateTime
+  rawPayload    Json?
+  createdAt     DateTime           @default(now())
+
+  channel       TelegramChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  member        TelegramMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, eventDate])
+  @@index([memberId])
+}
