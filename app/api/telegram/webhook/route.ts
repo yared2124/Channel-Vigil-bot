@@ -10,6 +10,25 @@ import { TelegramUpdate } from "@/types/telegram";
 
 export const dynamic = "force-dynamic";
 
+function isChannelMatch(
+  filter: string | undefined,
+  chatId: number,
+  chatUsername?: string
+): boolean {
+  if (!filter || filter.trim() === "") return true;
+  const f = filter.trim();
+  const idStr = String(chatId);
+
+  if (f === idStr) return true;
+  if (f.replace(/^-100/, "") === idStr.replace(/^-100/, "")) return true;
+  if (chatUsername) {
+    const cleanFilter = f.replace(/^@/, "").toLowerCase();
+    const cleanUser = chatUsername.replace(/^@/, "").toLowerCase();
+    if (cleanFilter === cleanUser) return true;
+  }
+  return false;
+}
+
 /**
  * Handles incoming Telegram Webhook updates.
  *
@@ -65,11 +84,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           : null;
 
         // Optional filter if CHANNEL_ID is defined
-        if (
-          monitoredChannelId &&
-          monitoredChannelId !== chatId &&
-          monitoredChannelId !== chatUsername
-        ) {
+        if (!isChannelMatch(monitoredChannelId, chatMemberUpdate.chat.id, chatMemberUpdate.chat.username)) {
           return;
         }
 
@@ -99,11 +114,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ? `@${joinRequest.chat.username}`
           : null;
 
-        if (
-          monitoredChannelId &&
-          monitoredChannelId !== chatId &&
-          monitoredChannelId !== chatUsername
-        ) {
+        if (!isChannelMatch(monitoredChannelId, joinRequest.chat.id, joinRequest.chat.username)) {
           return;
         }
 
