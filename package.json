@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/test-simulation.ts",
+    "test:prod": "tsx test/production-readiness.test.ts && tsx test/webhook-e2e.test.ts",
     "webhook:set": "tsx scripts/manage-webhook.ts set",
     "webhook:info": "tsx scripts/manage-webhook.ts info",
     "webhook:delete": "tsx scripts/manage-webhook.ts delete"
