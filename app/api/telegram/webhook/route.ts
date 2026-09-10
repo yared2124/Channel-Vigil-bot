@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
 import { TelegramBotClient } from "@/lib/telegram/client";
 import {
   buildChatMemberAlertHtml,
@@ -70,28 +69,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, status: "admin_chat_id_missing" });
   }
 
-  // 3. Process the event asynchronously via Next.js `after` to guarantee immediate HTTP 200 return
-  after(async () => {
-    try {
-      const client = new TelegramBotClient();
+  // 3. Process the event directly before returning HTTP 200
+  try {
+    const client = new TelegramBotClient();
+    console.log("[Telegram Webhook] Processing update_id:", update.update_id);
 
-      // Case A: Chat Member status change (Join, Leave, Ban, Promote)
-      if (update.chat_member) {
-        const chatMemberUpdate = update.chat_member;
-        const chatId = String(chatMemberUpdate.chat.id);
-        const chatUsername = chatMemberUpdate.chat.username
-          ? `@${chatMemberUpdate.chat.username}`
-          : null;
+    // Case A: Chat Member status change (Join, Leave, Ban, Promote)
+    if (update.chat_member) {
+      const chatMemberUpdate = update.chat_member;
+      const chatTitle = chatMemberUpdate.chat.title || "Channel";
+      console.log(
+        `[Telegram Webhook] chat_member event received in ${chatTitle} (${chatMemberUpdate.chat.id}) for user ${chatMemberUpdate.new_chat_member.user.first_name}`
+      );
 
-        // Optional filter if CHANNEL_ID is defined
-        if (!isChannelMatch(monitoredChannelId, chatMemberUpdate.chat.id, chatMemberUpdate.chat.username)) {
-          return;
-        }
-
+      // Optional filter if CHANNEL_ID is defined
+      if (!isChannelMatch(monitoredChannelId, chatMemberUpdate.chat.id, chatMemberUpdate.chat.username)) {
+        console.warn(
+          `[Telegram Webhook] Event ignored: channel filter (${monitoredChannelId}) does not match chat ID (${chatMemberUpdate.chat.id})`
+        );
+      } else {
         const { html, transition } = buildChatMemberAlertHtml(chatMemberUpdate);
 
-        // Discard internal unknown transitions if desired, or notify admin
         if (transition !== "UNKNOWN") {
+          console.log(`[Telegram Webhook] Dispatching ${transition} alert to admin ${adminChatId}`);
           const res = await client.sendMessage({
             chat_id: adminChatId,
             text: html,
@@ -99,65 +99,55 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           });
 
           if (!res.ok) {
-            console.error(
-              `[Telegram Webhook] Failed to dispatch chat_member alert: ${res.description}`
-            );
+            console.error(`[Telegram Webhook] Failed to dispatch alert: ${res.description}`);
+          } else {
+            console.log(`[Telegram Webhook] Alert successfully delivered to admin!`);
           }
         }
       }
+    }
 
-      // Case B: Chat Join Request (Channels with approval links enabled)
-      if (update.chat_join_request) {
-        const joinRequest = update.chat_join_request;
-        const chatId = String(joinRequest.chat.id);
-        const chatUsername = joinRequest.chat.username
-          ? `@${joinRequest.chat.username}`
-          : null;
+    // Case B: Chat Join Request (Channels with approval links enabled)
+    if (update.chat_join_request) {
+      const joinRequest = update.chat_join_request;
+      console.log(`[Telegram Webhook] chat_join_request received for ${joinRequest.from.first_name}`);
 
-        if (!isChannelMatch(monitoredChannelId, joinRequest.chat.id, joinRequest.chat.username)) {
-          return;
-        }
-
+      if (isChannelMatch(monitoredChannelId, joinRequest.chat.id, joinRequest.chat.username)) {
         const html = buildJoinRequestAlertHtml(joinRequest);
-        const res = await client.sendMessage({
+        await client.sendMessage({
           chat_id: adminChatId,
           text: html,
           parse_mode: "HTML",
         });
-
-        if (!res.ok) {
-          console.error(
-            `[Telegram Webhook] Failed to dispatch join_request alert: ${res.description}`
-          );
-        }
       }
-
-      // Case C: Bot administrator rights change in channel
-      if (update.my_chat_member) {
-        const myUpdate = update.my_chat_member;
-        const newStatus = myUpdate.new_chat_member.status;
-        const chatTitle = myUpdate.chat.title || "Channel";
-
-        const text = [
-          `🤖 <b>Bot Channel Permission Update</b>`,
-          `━━━━━━━━━━━━━━━━━━`,
-          `📢 <b>Channel:</b> <b>${chatTitle}</b> (<code>${myUpdate.chat.id}</code>)`,
-          `📊 <b>New Status:</b> <code>${newStatus}</code>`,
-          `⏱️ <b>Date:</b> <code>${new Date(myUpdate.date * 1000).toISOString()}</code>`,
-        ].join("\n");
-
-        await client.sendMessage({
-          chat_id: adminChatId,
-          text,
-          parse_mode: "HTML",
-        });
-      }
-    } catch (dispatchErr) {
-      console.error("[Telegram Webhook] Background task error:", dispatchErr);
     }
-  });
 
-  // 4. Immediate HTTP 200 acknowledge to Telegram server
+    // Case C: Bot administrator rights change in channel
+    if (update.my_chat_member) {
+      const myUpdate = update.my_chat_member;
+      const newStatus = myUpdate.new_chat_member.status;
+      const chatTitle = myUpdate.chat.title || "Channel";
+      console.log(`[Telegram Webhook] my_chat_member status changed to: ${newStatus}`);
+
+      const text = [
+        `🤖 <b>Bot Channel Permission Update</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `📢 <b>Channel:</b> <b>${chatTitle}</b> (<code>${myUpdate.chat.id}</code>)`,
+        `📊 <b>New Status:</b> <code>${newStatus}</code>`,
+        `⏱️ <b>Date:</b> <code>${new Date(myUpdate.date * 1000).toISOString()}</code>`,
+      ].join("\n");
+
+      await client.sendMessage({
+        chat_id: adminChatId,
+        text,
+        parse_mode: "HTML",
+      });
+    }
+  } catch (dispatchErr) {
+    console.error("[Telegram Webhook] Processing error:", dispatchErr);
+  }
+
+  // 4. Return HTTP 200 acknowledge to Telegram server
   return NextResponse.json({ ok: true });
 }
 
