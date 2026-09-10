@@ -10,13 +10,15 @@ if (!BOT_TOKEN) {
 }
 
 const commands = [
-  { command: "start", description: "Start the bot & view instructions" },
-  { command: "channels", description: "List all your monitored channels" },
-  { command: "help", description: "How to connect your channel" },
+  { command: "start", description: "Start the bot & view instructions / ጀምር" },
+  { command: "channels", description: "List your monitored channels / ቻናሎችህን እይ" },
+  { command: "lang", description: "ቋንቋ ይቀይሩ / Switch language (Amharic / English)" },
+  { command: "welcome", description: "View or configure auto-welcome message" },
+  { command: "help", description: "Help & channel connection guide / መመሪያ" },
 ];
 
 async function registerCommands() {
-  console.log("📡 Registering bot commands with Telegram API...");
+  console.log("📡 Registering updated bot commands with Telegram API...");
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setMyCommands`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

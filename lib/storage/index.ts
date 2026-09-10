@@ -170,3 +170,117 @@ export async function getUserChannels(
     .map((cid) => memoryChannelStore.get(cid))
     .filter((b): b is ChannelBinding => Boolean(b));
 }
+
+// Language and Welcome Message Stores (In-memory fallbacks)
+const memoryUserLanguages = new Map<string, "en" | "am">();
+const memoryChannelWelcomes = new Map<string, string>();
+
+/**
+ * Saves user's preferred language ('en' | 'am').
+ */
+export async function setUserLanguage(
+  userId: number | string,
+  lang: "en" | "am"
+): Promise<void> {
+  const cleanUserId = String(userId);
+  const redis = getRedisClient();
+
+  if (redis) {
+    try {
+      await redis.set(`user_lang:${cleanUserId}`, lang);
+      return;
+    } catch (err) {
+      console.error("[Storage] Redis setUserLanguage failed:", err);
+    }
+  }
+
+  memoryUserLanguages.set(cleanUserId, lang);
+}
+
+/**
+ * Retrieves user's preferred language (defaults to 'en').
+ */
+export async function getUserLanguage(
+  userId: number | string
+): Promise<"en" | "am"> {
+  const cleanUserId = String(userId);
+  const redis = getRedisClient();
+
+  if (redis) {
+    try {
+      const lang = await redis.get<string>(`user_lang:${cleanUserId}`);
+      if (lang === "am" || lang === "en") {
+        return lang;
+      }
+    } catch (err) {
+      console.error("[Storage] Redis getUserLanguage failed:", err);
+    }
+  }
+
+  return memoryUserLanguages.get(cleanUserId) || "en";
+}
+
+/**
+ * Sets a custom welcome message for a channel.
+ */
+export async function setChannelWelcome(
+  channelId: number | string,
+  message: string
+): Promise<void> {
+  const cleanChannelId = normalizeChannelId(channelId);
+  const redis = getRedisClient();
+
+  if (redis) {
+    try {
+      await redis.set(`channel_welcome:${cleanChannelId}`, message);
+      return;
+    } catch (err) {
+      console.error("[Storage] Redis setChannelWelcome failed:", err);
+    }
+  }
+
+  memoryChannelWelcomes.set(cleanChannelId, message);
+}
+
+/**
+ * Retrieves the custom welcome message for a channel.
+ */
+export async function getChannelWelcome(
+  channelId: number | string
+): Promise<string | null> {
+  const cleanChannelId = normalizeChannelId(channelId);
+  const redis = getRedisClient();
+
+  if (redis) {
+    try {
+      const msg = await redis.get<string>(`channel_welcome:${cleanChannelId}`);
+      if (msg) return msg;
+    } catch (err) {
+      console.error("[Storage] Redis getChannelWelcome failed:", err);
+    }
+  }
+
+  return memoryChannelWelcomes.get(cleanChannelId) || null;
+}
+
+/**
+ * Deletes the custom welcome message for a channel.
+ */
+export async function deleteChannelWelcome(
+  channelId: number | string
+): Promise<void> {
+  const cleanChannelId = normalizeChannelId(channelId);
+  const redis = getRedisClient();
+
+  if (redis) {
+    try {
+      await redis.del(`channel_welcome:${cleanChannelId}`);
+      return;
+    } catch (err) {
+      console.error("[Storage] Redis deleteChannelWelcome failed:", err);
+    }
+  }
+
+  memoryChannelWelcomes.delete(cleanChannelId);
+}
+

@@ -64,13 +64,34 @@ export class TelegramBotClient {
    * Sends an alert message to a specified chat or admin user.
    */
   async sendMessage(payload: SendMessagePayload): Promise<TelegramApiResponse<TelegramMessage>> {
-    return this.execute<TelegramMessage>("sendMessage", {
+    const body: Record<string, unknown> = {
       chat_id: payload.chat_id,
       text: payload.text,
       parse_mode: payload.parse_mode ?? "HTML",
       disable_web_page_preview: payload.disable_web_page_preview ?? true,
       disable_notification: payload.disable_notification ?? false,
       reply_to_message_id: payload.reply_to_message_id,
+    };
+
+    if (payload.reply_markup) {
+      body.reply_markup = payload.reply_markup;
+    }
+
+    return this.execute<TelegramMessage>("sendMessage", body);
+  }
+
+  /**
+   * Responds to an inline button callback query.
+   */
+  async answerCallbackQuery(
+    callbackQueryId: string,
+    text?: string,
+    showAlert = false
+  ): Promise<TelegramApiResponse<boolean>> {
+    return this.execute<boolean>("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: showAlert,
     });
   }
 

@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TelegramBotClient } from "@/lib/telegram/client";
 import {
-  buildChatMemberAlertHtml,
-  buildJoinRequestAlertHtml,
-  escapeHtml,
-} from "@/lib/telegram/formatters";
+  buildLocalizedChatMemberAlertHtml,
+  buildLocalizedJoinRequestAlertHtml,
+  getLanguageKeyboard,
+  SupportedLanguage,
+  translations,
+} from "@/lib/i18n";
+import { escapeHtml } from "@/lib/telegram/formatters";
 import { verifyTelegramWebhookSecret } from "@/lib/telegram/security";
 import {
+  deleteChannelWelcome,
   getChannelOwner,
+  getChannelWelcome,
   getUserChannels,
+  getUserLanguage,
   removeChannelOwner,
   saveChannelOwner,
+  setChannelWelcome,
+  setUserLanguage,
 } from "@/lib/storage";
 import { TelegramUpdate } from "@/types/telegram";
 
@@ -38,11 +46,13 @@ function isChannelMatch(
 /**
  * Handles incoming Telegram Webhook updates.
  *
- * Supports:
- * - Multi-user dynamic channel registration via `my_chat_member`
- * - Direct routing of member join/leave alerts to the channel owner
- * - Interactive commands (/start, /help, /channels) in private chat
- * - Timing-safe secret token verification
+ * Supported features:
+ * - Multi-user dynamic channel registration
+ * - Bilingual localization (Amharic 🇪🇹 & English 🇬🇧)
+ * - Interactive language switcher (/lang) with inline keyboards
+ * - Auto-Welcome message system (/welcome, /setwelcome, /delwelcome)
+ * - Channel vigilance (Join, Leave, Ban, Join Requests)
+ * - Timing-safe webhook secret authentication
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secretHeader = req.headers.get("x-telegram-bot-api-secret-token");
@@ -76,16 +86,50 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const client = new TelegramBotClient();
     console.log("[Telegram Webhook] Processing update_id:", update.update_id);
 
-    // Case 1: Direct Private Messages (/start, /help, /channels)
+    // Case 1: Callback Query (Language Selector Inline Buttons)
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      const data = cb.data || "";
+      const userId = cb.from.id;
+
+      if (data.startsWith("set_lang:")) {
+        const selectedLang = data.split(":")[1] as SupportedLanguage;
+        await setUserLanguage(userId, selectedLang);
+
+        const confirmation =
+          selectedLang === "am"
+            ? "ቋንቋ ወደ አማርኛ ተቀይሯል! 🇪🇹"
+            : "Language set to English! 🇬🇧";
+
+        await client.answerCallbackQuery(cb.id, confirmation, false);
+
+        await client.sendMessage({
+          chat_id: userId,
+          text: translations[selectedLang].langSwitched,
+          parse_mode: "HTML",
+        });
+      }
+    }
+
+    // Case 2: Direct Private Messages (/start, /help, /lang, /channels, /welcome, /setwelcome)
     if (update.message && update.message.chat.type === "private") {
       const msg = update.message;
       const text = (msg.text || "").trim();
       const userId = msg.from ? msg.from.id : msg.chat.id;
       const userName = msg.from ? msg.from.first_name : "there";
+      const userLang = await getUserLanguage(userId);
+      const t = translations[userLang];
 
-      if (text.startsWith("/start") || text.startsWith("/help")) {
+      if (text.startsWith("/lang") || text.startsWith("/language")) {
+        await client.sendMessage({
+          chat_id: userId,
+          text: t.chooseLang,
+          parse_mode: "HTML",
+          reply_markup: getLanguageKeyboard(),
+        });
+      } else if (text.startsWith("/start") || text.startsWith("/help")) {
         const userChannels = await getUserChannels(userId);
-        let channelsListHtml = "<i>No channels connected yet.</i>";
+        let channelsListHtml = t.noChannelsConnected;
 
         if (userChannels.length > 0) {
           channelsListHtml = userChannels
@@ -94,36 +138,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         const replyHtml = [
-          `👋 <b>Hello, ${escapeHtml(userName)}! Welcome to Channel Vigil Bot!</b>`,
+          t.welcomeTitle,
           `━━━━━━━━━━━━━━━━━━`,
-          `I monitor your Telegram channels 24/7 and notify you immediately when someone joins, leaves, or requests access.`,
+          t.welcomeSubtitle,
           ``,
-          `<b>🚀 How to connect your Channel:</b>`,
-          `1. Open your Telegram Channel settings.`,
-          `2. Tap <b>Administrators</b> ➡️ <b>Add Administrator</b>.`,
-          `3. Search for: <b>@my_channel_vigil_bot</b>`,
-          `4. Enable <b>Invite Users via Link</b> and <b>Manage Channel</b>.`,
-          `5. Tap <b>Done / Save</b>.`,
-          ``,
-          `As soon as you add me, I will automatically bind your channel to your account and start sending you real-time alerts right here!`,
+          t.howToConnectTitle,
+          t.howToConnectSteps,
           `━━━━━━━━━━━━━━━━━━`,
-          `📋 <b>Your Connected Channels:</b>`,
+          t.connectedChannelsTitle,
           channelsListHtml,
           ``,
-          `💡 <i>Tip: Send /channels anytime to inspect your active channels.</i>`,
+          t.menuTip,
         ].join("\n");
 
         await client.sendMessage({
           chat_id: userId,
           text: replyHtml,
           parse_mode: "HTML",
+          reply_markup: getLanguageKeyboard(),
         });
       } else if (text.startsWith("/channels")) {
         const userChannels = await getUserChannels(userId);
         if (userChannels.length === 0) {
           await client.sendMessage({
             chat_id: userId,
-            text: `📋 <b>No Channels Connected</b>\n\nAdd <b>@my_channel_vigil_bot</b> as an Administrator in your channel to begin monitoring!`,
+            text: t.noChannelsConnected,
             parse_mode: "HTML",
           });
         } else {
@@ -133,14 +172,78 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
           await client.sendMessage({
             chat_id: userId,
-            text: `📋 <b>Your Monitored Channels:</b>\n━━━━━━━━━━━━━━━━━━\n${list}`,
+            text: `${t.connectedChannelsTitle}\n━━━━━━━━━━━━━━━━━━\n${list}`,
             parse_mode: "HTML",
           });
+        }
+      } else if (text.startsWith("/setwelcome")) {
+        const welcomeContent = text.replace(/^\/setwelcome\s*/, "").trim();
+
+        if (!welcomeContent) {
+          await client.sendMessage({
+            chat_id: userId,
+            text: t.welcomeInstruction,
+            parse_mode: "HTML",
+          });
+        } else {
+          const userChannels = await getUserChannels(userId);
+          if (userChannels.length === 0) {
+            await client.sendMessage({
+              chat_id: userId,
+              text: `${t.noChannelsConnected}\n\n${t.welcomeInstruction}`,
+              parse_mode: "HTML",
+            });
+          } else {
+            // Save welcome message for the user's connected channels
+            for (const c of userChannels) {
+              await setChannelWelcome(c.channelId, welcomeContent);
+            }
+
+            await client.sendMessage({
+              chat_id: userId,
+              text: `${t.welcomeSaved}\n\n${t.welcomePreview}\n<i>${escapeHtml(welcomeContent)}</i>`,
+              parse_mode: "HTML",
+            });
+          }
+        }
+      } else if (text.startsWith("/delwelcome")) {
+        const userChannels = await getUserChannels(userId);
+        for (const c of userChannels) {
+          await deleteChannelWelcome(c.channelId);
+        }
+        await client.sendMessage({
+          chat_id: userId,
+          text: t.welcomeDeleted,
+          parse_mode: "HTML",
+        });
+      } else if (text.startsWith("/welcome")) {
+        const userChannels = await getUserChannels(userId);
+        if (userChannels.length === 0) {
+          await client.sendMessage({
+            chat_id: userId,
+            text: `${t.noChannelsConnected}\n\n${t.welcomeInstruction}`,
+            parse_mode: "HTML",
+          });
+        } else {
+          const currentWelcome = await getChannelWelcome(userChannels[0].channelId);
+          if (currentWelcome) {
+            await client.sendMessage({
+              chat_id: userId,
+              text: `${t.welcomePreview}\n━━━━━━━━━━━━━━━━━━\n${escapeHtml(currentWelcome)}\n\n💡 <i>To change it, use /setwelcome &lt;new message&gt;. To remove, use /delwelcome</i>`,
+              parse_mode: "HTML",
+            });
+          } else {
+            await client.sendMessage({
+              chat_id: userId,
+              text: `${t.welcomeEmpty}\n\n${t.welcomeInstruction}`,
+              parse_mode: "HTML",
+            });
+          }
         }
       }
     }
 
-    // Case 2: Bot Administrator Status Change (Auto-Registration / De-Registration)
+    // Case 3: Bot Administrator Status Change (Channel Auto-Registration / De-Registration)
     if (update.my_chat_member) {
       const myUpdate = update.my_chat_member;
       const newStatus = myUpdate.new_chat_member.status;
@@ -149,21 +252,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const addedByUserId = myUpdate.from ? myUpdate.from.id : null;
 
       console.log(
-        `[Telegram Webhook] my_chat_member update in ${chatTitle} (${channelId}): status=${newStatus} by user=${addedByUserId}`
+        `[Telegram Webhook] my_chat_member in ${chatTitle} (${channelId}): status=${newStatus} by user=${addedByUserId}`
       );
 
       if (newStatus === "administrator" && addedByUserId) {
-        // User added bot as admin: bind channel to user!
         await saveChannelOwner(channelId, addedByUserId, chatTitle);
+        const ownerLang = await getUserLanguage(addedByUserId);
+        const t = translations[ownerLang];
 
         const welcomeText = [
-          `🎉 <b>Channel Successfully Connected!</b>`,
+          t.channelConnectedTitle,
           `━━━━━━━━━━━━━━━━━━`,
-          `📢 <b>Channel:</b> <b>${escapeHtml(chatTitle)}</b> (<code>${channelId}</code>)`,
-          `✅ <b>Status:</b> Administrator active`,
-          `👤 <b>Owner:</b> Connected to your account`,
+          `📢 <b>${t.channelLabel}:</b> <b>${escapeHtml(chatTitle)}</b> (<code>${channelId}</code>)`,
+          `👤 <b>${t.userLabel}:</b> ${t.channelConnectedBody}`,
           ``,
-          `Whenever anyone joins, leaves, or requests access to <b>${escapeHtml(chatTitle)}</b>, you will receive real-time notifications right here!`,
+          t.menuTip,
         ].join("\n");
 
         await client.sendMessage({
@@ -172,18 +275,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           parse_mode: "HTML",
         });
       } else if ((newStatus === "left" || newStatus === "kicked") && addedByUserId) {
-        // Bot was removed: unbind channel
         await removeChannelOwner(channelId, addedByUserId);
+        const ownerLang = await getUserLanguage(addedByUserId);
+        const t = translations[ownerLang];
 
         await client.sendMessage({
           chat_id: addedByUserId,
-          text: `❌ <b>Channel Disconnected</b>\n\nMonitoring for <b>${escapeHtml(chatTitle)}</b> has been disabled.`,
+          text: `${t.channelDisconnectedTitle}\n\n${escapeHtml(chatTitle)}: ${t.channelDisconnectedBody}`,
           parse_mode: "HTML",
         });
       }
     }
 
-    // Case 3: Chat Member Status Change (Join, Leave, Ban)
+    // Case 4: Chat Member Status Change (Join, Leave, Ban)
     if (update.chat_member) {
       const chatMemberUpdate = update.chat_member;
       const chatTitle = chatMemberUpdate.chat.title || "Channel";
@@ -197,16 +301,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           `[Telegram Webhook] Event ignored: channel filter (${monitoredChannelId}) does not match chat ID (${chatMemberUpdate.chat.id})`
         );
       } else {
-        const { html, transition } = buildChatMemberAlertHtml(chatMemberUpdate);
+        const dynamicOwner = await getChannelOwner(chatMemberUpdate.chat.id);
+        const recipientId = dynamicOwner || fallbackAdminChatId;
 
-        if (transition !== "UNKNOWN") {
-          // Look up channel owner dynamically, or fallback to default admin
-          const dynamicOwner = await getChannelOwner(chatMemberUpdate.chat.id);
-          const recipientId = dynamicOwner || fallbackAdminChatId;
+        if (recipientId) {
+          const recipientLang = await getUserLanguage(recipientId);
+          const { html, transition } = buildLocalizedChatMemberAlertHtml(
+            chatMemberUpdate,
+            recipientLang
+          );
 
-          if (recipientId) {
+          if (transition !== "UNKNOWN") {
             console.log(
-              `[Telegram Webhook] Dispatching ${transition} alert to recipient ${recipientId} (owner: ${dynamicOwner || "fallback"})`
+              `[Telegram Webhook] Dispatching ${transition} alert (${recipientLang}) to recipient ${recipientId}`
             );
 
             const res = await client.sendMessage({
@@ -220,14 +327,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             } else {
               console.log(`[Telegram Webhook] Alert delivered to recipient ${recipientId}!`);
             }
-          } else {
-            console.warn(`[Telegram Webhook] No recipient found for channel ${chatMemberUpdate.chat.id}`);
+
+            // AUTO-WELCOME FEATURE: If a new member joined, send the configured welcome message
+            if (transition === "JOINED") {
+              const customWelcome = await getChannelWelcome(chatMemberUpdate.chat.id);
+              if (customWelcome) {
+                const joiner = chatMemberUpdate.new_chat_member.user;
+                const joinerMsg = [
+                  `👋 <b>Welcome, ${escapeHtml(joiner.first_name)}!</b>`,
+                  `Welcome to <b>${escapeHtml(chatTitle)}</b>!`,
+                  ``,
+                  customWelcome,
+                ].join("\n");
+
+                try {
+                  await client.sendMessage({
+                    chat_id: joiner.id,
+                    text: joinerMsg,
+                    parse_mode: "HTML",
+                  });
+                  console.log(`[Telegram Webhook] Auto-welcome sent to joiner ${joiner.id}`);
+                } catch (welcomeErr) {
+                  console.warn(
+                    `[Telegram Webhook] Could not send welcome DM to joiner (user may not have started the bot):`,
+                    welcomeErr
+                  );
+                }
+              }
+            }
           }
         }
       }
     }
 
-    // Case 4: Chat Join Request (Channels with approval links enabled)
+    // Case 5: Chat Join Request (Channels with approval links enabled)
     if (update.chat_join_request) {
       const joinRequest = update.chat_join_request;
       console.log(`[Telegram Webhook] chat_join_request received for ${joinRequest.from.first_name}`);
@@ -237,7 +370,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const recipientId = dynamicOwner || fallbackAdminChatId;
 
         if (recipientId) {
-          const html = buildJoinRequestAlertHtml(joinRequest);
+          const recipientLang = await getUserLanguage(recipientId);
+          const html = buildLocalizedJoinRequestAlertHtml(joinRequest, recipientLang);
           await client.sendMessage({
             chat_id: recipientId,
             text: html,
@@ -262,6 +396,8 @@ export async function GET(): Promise<NextResponse> {
     ok: true,
     service: "Telegram Channel Join Vigil Webhook",
     multi_user_support: true,
+    languages: ["en", "am"],
+    features: ["bilingual", "auto_welcome", "channel_vigil"],
     timestamp: new Date().toISOString(),
   });
 }

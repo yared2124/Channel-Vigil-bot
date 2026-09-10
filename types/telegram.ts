@@ -151,6 +151,24 @@ export interface TelegramMessage {
   text?: string;
 }
 
+export interface InlineKeyboardButton {
+  text: string;
+  url?: string;
+  callback_data?: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+  chat_instance?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
@@ -160,6 +178,7 @@ export interface TelegramUpdate {
   my_chat_member?: TelegramChatMemberUpdated;
   chat_member?: TelegramChatMemberUpdated;
   chat_join_request?: TelegramChatJoinRequest;
+  callback_query?: TelegramCallbackQuery;
 }
 
 export type ParseMode = "HTML" | "MarkdownV2" | "Markdown";
@@ -171,6 +190,7 @@ export interface SendMessagePayload {
   disable_web_page_preview?: boolean;
   disable_notification?: boolean;
   reply_to_message_id?: number;
+  reply_markup?: InlineKeyboardMarkup;
 }
 
 export interface TelegramApiResponse<T> {
