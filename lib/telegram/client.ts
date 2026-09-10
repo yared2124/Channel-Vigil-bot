@@ -96,6 +96,19 @@ export class TelegramBotClient {
   }
 
   /**
+   * Approves a user's pending request to join a channel.
+   */
+  async approveChatJoinRequest(
+    chatId: number | string,
+    userId: number
+  ): Promise<TelegramApiResponse<boolean>> {
+    return this.execute<boolean>("approveChatJoinRequest", {
+      chat_id: chatId,
+      user_id: userId,
+    });
+  }
+
+  /**
    * Configures the webhook URL with allowed updates and secret token.
    */
   async setWebhook(params: {

@@ -5,6 +5,7 @@ import {
   translations,
 } from "../lib/i18n";
 import {
+  DEFAULT_WELCOME_MESSAGE,
   deleteChannelWelcome,
   getChannelWelcome,
   getUserLanguage,
@@ -125,7 +126,10 @@ async function runI18nAndWelcomeTests() {
 
   await deleteChannelWelcome(testChannelId);
   const welcomeAfterDel = await getChannelWelcome(testChannelId);
-  assert(welcomeAfterDel === null, "Welcome message successfully deleted");
+  assert(
+    welcomeAfterDel === DEFAULT_WELCOME_MESSAGE,
+    "Default developer journey message returned as fallback"
+  );
 
   console.log("\n==================================================");
   console.log("🎉 ALL BILINGUAL & AUTO-WELCOME TESTS PASSED!");

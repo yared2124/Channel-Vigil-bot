@@ -242,12 +242,15 @@ export async function setChannelWelcome(
   memoryChannelWelcomes.set(cleanChannelId, message);
 }
 
+export const DEFAULT_WELCOME_MESSAGE =
+  "I share my developer journey building apps, solving problems, exploring AI, and the lessons behind the work. Real projects, real insights, and the process of growing in tech.";
+
 /**
- * Retrieves the custom welcome message for a channel.
+ * Retrieves the custom welcome message for a channel, falling back to the default developer message.
  */
 export async function getChannelWelcome(
   channelId: number | string
-): Promise<string | null> {
+): Promise<string> {
   const cleanChannelId = normalizeChannelId(channelId);
   const redis = getRedisClient();
 
@@ -260,7 +263,7 @@ export async function getChannelWelcome(
     }
   }
 
-  return memoryChannelWelcomes.get(cleanChannelId) || null;
+  return memoryChannelWelcomes.get(cleanChannelId) || DEFAULT_WELCOME_MESSAGE;
 }
 
 /**

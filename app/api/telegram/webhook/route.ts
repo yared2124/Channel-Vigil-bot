@@ -140,6 +140,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const replyHtml = [
           t.welcomeTitle,
           `━━━━━━━━━━━━━━━━━━`,
+          `<i>"I share my developer journey building apps, solving problems, exploring AI, and the lessons behind the work. Real projects, real insights, and the process of growing in tech."</i>`,
+          `━━━━━━━━━━━━━━━━━━`,
           t.welcomeSubtitle,
           ``,
           t.howToConnectTitle,
@@ -328,31 +330,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               console.log(`[Telegram Webhook] Alert delivered to recipient ${recipientId}!`);
             }
 
-            // AUTO-WELCOME FEATURE: If a new member joined, send the configured welcome message
+            // AUTO-WELCOME FEATURE: Send the welcome message to new joiners
             if (transition === "JOINED") {
               const customWelcome = await getChannelWelcome(chatMemberUpdate.chat.id);
-              if (customWelcome) {
-                const joiner = chatMemberUpdate.new_chat_member.user;
-                const joinerMsg = [
-                  `👋 <b>Welcome, ${escapeHtml(joiner.first_name)}!</b>`,
-                  `Welcome to <b>${escapeHtml(chatTitle)}</b>!`,
-                  ``,
-                  customWelcome,
-                ].join("\n");
+              const joiner = chatMemberUpdate.new_chat_member.user;
+              const joinerMsg = [
+                `👋 <b>Welcome, ${escapeHtml(joiner.first_name)}!</b>`,
+                ``,
+                customWelcome,
+              ].join("\n");
 
-                try {
-                  await client.sendMessage({
-                    chat_id: joiner.id,
-                    text: joinerMsg,
-                    parse_mode: "HTML",
-                  });
-                  console.log(`[Telegram Webhook] Auto-welcome sent to joiner ${joiner.id}`);
-                } catch (welcomeErr) {
-                  console.warn(
-                    `[Telegram Webhook] Could not send welcome DM to joiner (user may not have started the bot):`,
-                    welcomeErr
+              try {
+                const welcomeRes = await client.sendMessage({
+                  chat_id: joiner.id,
+                  text: joinerMsg,
+                  parse_mode: "HTML",
+                });
+                if (!welcomeRes.ok) {
+                  console.log(
+                    `[Telegram Webhook] Note on direct welcome to user ${joiner.id}: ${welcomeRes.description} (User hasn't messaged bot yet)`
                   );
+                } else {
+                  console.log(`[Telegram Webhook] Auto-welcome sent to joiner ${joiner.id}`);
                 }
+              } catch (welcomeErr) {
+                console.warn(`[Telegram Webhook] Could not send welcome DM to joiner:`, welcomeErr);
               }
             }
           }
@@ -377,6 +379,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             text: html,
             parse_mode: "HTML",
           });
+
+          // Send welcome message to applicant in private chat!
+          const customWelcome = await getChannelWelcome(joinRequest.chat.id);
+          const applicantMsg = [
+            `👋 <b>Welcome, ${escapeHtml(joinRequest.from.first_name)}!</b>`,
+            ``,
+            customWelcome,
+          ].join("\n");
+
+          try {
+            await client.sendMessage({
+              chat_id: joinRequest.user_chat_id,
+              text: applicantMsg,
+              parse_mode: "HTML",
+            });
+            console.log(`[Telegram Webhook] Welcome sent to applicant ${joinRequest.user_chat_id}`);
+          } catch (appErr) {
+            console.warn(`[Telegram Webhook] Failed to message applicant:`, appErr);
+          }
         }
       }
     }
